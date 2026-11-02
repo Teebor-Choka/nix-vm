@@ -48,9 +48,7 @@ let
   # never values). Feeds `vm doctor --secrets`.
   vmSecretEnvsStr = bakeMap (
     spec:
-    ''"${
-      concatStringsSep " " (filter (n: n != null) (map (sec: sec.target.envName) spec.secrets))
-    }"''
+    ''"${concatStringsSep " " (filter (n: n != null) (map (sec: sec.target.envName) spec.secrets))}"''
   );
 
   # Platform-derived home directory prefix for option defaults
