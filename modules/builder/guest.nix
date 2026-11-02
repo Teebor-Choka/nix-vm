@@ -43,6 +43,12 @@ in
     cores = lib.mkDefault 2;
   };
 
+  # fetchurl passes NIX_CURL_FLAGS from the daemon env into every fixed-output download. Its
+  # curl (OpenSSL 3.6) offers the hybrid post-quantum key share by default; the vmnet NAT path
+  # drops that large ClientHello ("TLS connect error ... unexpected eof"). Plain X25519 and
+  # TLS 1.2 both pass (probed in the builder sandbox: default 0/3, X25519 3/3).
+  systemd.services.nix-daemon.environment.NIX_CURL_FLAGS = lib.mkDefault "--curves X25519";
+
   # NAT networking — host can connect to the guest's vmnet IP; guest has internet access.
   microvm.interfaces = [
     {
