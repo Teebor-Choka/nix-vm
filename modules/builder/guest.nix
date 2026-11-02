@@ -34,7 +34,8 @@ in
   microvm.hypervisor = "vfkit";
   microvm.vfkit.package = vfkitWrapped;
   microvm.vcpu = 4;
-  microvm.mem = 4096;
+  # 4 GiB OOM-killed rustc (uv link step) with 4 parallel jobs.
+  microvm.mem = lib.mkDefault 8192;
 
   # NAT networking — host can connect to the guest's vmnet IP; guest has internet access.
   microvm.interfaces = [
