@@ -34,8 +34,14 @@ in
   microvm.hypervisor = "vfkit";
   microvm.vfkit.package = vfkitWrapped;
   microvm.vcpu = 4;
-  # 4 GiB OOM-killed rustc (uv link step) with 4 parallel jobs.
-  microvm.mem = lib.mkDefault 8192;
+  microvm.mem = 4096;
+
+  # Default max-jobs=auto (4) x cores=0 (4) piles rustc/linker processes into 4 GiB and the
+  # OOM killer stops them (uv link step: "rustc was terminated by a deadly signal").
+  nix.settings = {
+    max-jobs = lib.mkDefault 1;
+    cores = lib.mkDefault 2;
+  };
 
   # NAT networking — host can connect to the guest's vmnet IP; guest has internet access.
   microvm.interfaces = [
