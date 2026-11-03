@@ -87,6 +87,15 @@ in
   # a dead session's build leftovers never accumulate.
   boot.tmp.cleanOnBoot = true;
 
+  # One uv compile (rustc) exceeds the 4 GiB of RAM and the OOM killer stops it; max-jobs=1
+  # does not help. Spill to the /tmp disk volume (recreated each boot with the volume wipe).
+  swapDevices = lib.mkDefault [
+    {
+      device = "/tmp/swapfile";
+      size = 4096; # MiB
+    }
+  ];
+
   networking.hostName = "linux-builder";
 
   services.openssh = {
