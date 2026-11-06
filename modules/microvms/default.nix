@@ -34,6 +34,11 @@ let
   # Whether the host `vm` helper should bridge the SSH agent for each VM (name → 0|1)
   vmForwardAgentStr = bakeMap (spec: if spec.forwardSshAgent then "1" else "0");
   vmPersistentStr = bakeMap (spec: if spec.persistent then "1" else "0");
+  # Per-VM virtiofs tags the Linux helper serves read-only (name → space list).
+  shareTag = s: if s.tag != "" then s.tag else baseNameOf s.mountPoint;
+  vmRoTagsStr = bakeMap (
+    spec: ''"ro-store ${concatMapStringsSep " " shareTag (filter (s: s.readOnly) spec.extraShares)}"''
+  );
   # Per-VM default trust grant (name → csv of tokens; empty = grant nothing). Quoted so an empty
   # value or a multi-token csv survives the bash assoc-array literal.
   vmTrustDefaultStr = bakeMap (spec: ''"${concatStringsSep "," spec.trust.default}"'');
@@ -353,6 +358,11 @@ let
                 type = types.str;
                 default = "";
                 description = "virtiofs tag (auto-derived from basename(mountPoint) when empty)";
+              };
+              readOnly = mkOption {
+                type = types.bool;
+                default = false;
+                description = "Serve the share read-only from the host (virtiofsd --readonly), not just mount it ro.";
               };
             };
           }
@@ -714,6 +724,9 @@ in
           # Per-VM persistence (0 = ephemeral per-instance, 1 = persistent single-instance)
           declare -A VM_PERSISTENT=(${vmPersistentStr})
 
+          # Per-VM virtiofs tags served read-only by the host virtiofsd (Linux)
+          declare -A VM_RO_TAGS=(${vmRoTagsStr})
+
           # Per-VM SSH-agent forwarding (1 = bridge the host agent, 0 = skip)
           declare -A VM_FORWARD_AGENT=(${vmForwardAgentStr})
 
@@ -783,13 +796,13 @@ in
           # to support any Linux host. Pids land in $INST_DIR, which _sandy_reap_box already kills.
           VIRTIOFSD="${optionalString (!pkgs.stdenv.isDarwin) "${pkgs.virtiofsd}/bin/virtiofsd"}"
           _start_virtiofsd() {
-            local share_dir=$1/share/microvm/virtiofs tag_dir tag sock src ro _
+            local share_dir=$1/share/microvm/virtiofs ro_tags=''${VM_RO_TAGS[$2]:-ro-store} tag_dir tag sock src ro _
             [ -d "$share_dir" ] || return 0
             for tag_dir in "$share_dir"/*/; do
               tag=$(basename "$tag_dir"); sock=$(cat "$tag_dir/socket"); src=$(cat "$tag_dir/source")
               [ "$tag" = launchmount ] && [ -n "$MOUNT_SRC" ] && src=$MOUNT_SRC
               case "$src" in /*) ;; *) mkdir -p "$src" ;; esac
-              ro=""; [ "$tag" = ro-store ] && ro=--readonly
+              ro=""; _in_list "$tag" $ro_tags && ro=--readonly
               # Unprivileged virtiofsd can only act as us: squash every guest uid/gid onto ours, or
               # creates fail with EINVAL (guest gid 100 is unmapped in its namespace).
               "$VIRTIOFSD" --socket-path="$sock" --shared-dir="$src" --sandbox=namespace $ro \
@@ -1222,7 +1235,7 @@ in
             [ -n "$mem_pat" ] && { grep -q -- "$mem_pat" "$INST_DIR/microvm-run" && echo "→ mem override: ''${MEM_OVERRIDE} MiB" \
               || echo "⚠  --mem override did not match the runner — booting with the built-in mem" >&2; }
 
-            [ "$OS" = "Darwin" ] || _start_virtiofsd "$runner_pkg" || return 1
+            [ "$OS" = "Darwin" ] || _start_virtiofsd "$runner_pkg" "$name" || return 1
             RUNNER="$INST_DIR/microvm-run"
           }
 

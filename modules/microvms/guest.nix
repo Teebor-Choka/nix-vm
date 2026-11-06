@@ -34,6 +34,7 @@ let
   # Resolved extraShares: derive virtiofs tag from basename(mountPoint) when not set
   resolvedExtraShares = map (s: {
     inherit (s) source mountPoint;
+    readOnly = s.readOnly or false;
     tag = if s.tag != "" then s.tag else baseNameOf s.mountPoint;
     proto = "virtiofs";
   }) vmSpec.extraShares;
