@@ -362,13 +362,13 @@ let
               readOnly = mkOption {
                 type = types.bool;
                 default = false;
-                description = "Serve the share read-only from the host (virtiofsd --readonly), not just mount it ro.";
+                description = "Mount the share ro in the guest; on qemu the host also serves it with virtiofsd --readonly. vfkit has no host-side equivalent, so there guest root can remount it rw.";
               };
             };
           }
         );
         default = [ ];
-        description = "Extra host directories to share into this VM (virtiofs, read-write). Opt-in per VM.";
+        description = "Extra host directories to share into this VM (virtiofs, read-write unless readOnly). Opt-in per VM.";
         example = literalExpression ''
           [{ source = "/Users/alice/Projects"; mountPoint = "/home/alice/Projects"; }]
         '';
@@ -698,6 +698,13 @@ in
 
         (pkgs.writeShellScriptBin "nix-vm" ''
           set -euo pipefail
+          # Fallback for non-NixOS hosts (mkStandaloneHost), where systemPackages are never installed.
+          PATH="$PATH:${
+            makeBinPath [
+              pkgs.python3
+              pkgs.socat
+            ]
+          }"
 
           FLAKE="${flakeDir}"
           DEFINED_VMS="${vmNamesStr}"
@@ -792,8 +799,8 @@ in
             sed -E "$@" "$r" > "$r.new" && chmod u+x "$r.new" && mv "$r.new" "$r"
           }
 
-          # qemu needs one virtiofsd per share; a NixOS host runs them as services, so start them here
-          # to support any Linux host. Pids land in $INST_DIR, which _sandy_reap_box already kills.
+          # qemu needs one virtiofsd per share, served unprivileged so any Linux host works (needs
+          # unprivileged user namespaces). Pids land in $INST_DIR, which _sandy_reap_box already kills.
           VIRTIOFSD="${optionalString (!pkgs.stdenv.isDarwin) "${pkgs.virtiofsd}/bin/virtiofsd"}"
           _start_virtiofsd() {
             local share_dir=$1/share/microvm/virtiofs ro_tags=''${VM_RO_TAGS[$2]:-ro-store} tag_dir tag sock src ro _
@@ -814,7 +821,13 @@ in
             for tag_dir in "$share_dir"/*/; do
               sock=$(cat "$tag_dir/socket")
               for _ in $(seq 50); do [ -S "$sock" ] && break; sleep 0.1; done
-              [ -S "$sock" ] || { echo "✗ virtiofsd $(basename "$tag_dir") did not start: $INST_DIR/virtiofsd-*.log" >&2; return 1; }
+              # The log lives in $INST_DIR, which the exit trap wipes, so show it here.
+              [ -S "$sock" ] || {
+                tag=$(basename "$tag_dir")
+                echo "✗ virtiofsd $tag did not start:" >&2
+                tail -n 20 "$INST_DIR/virtiofsd-$tag.log" >&2
+                return 1
+              }
             done
           }
 

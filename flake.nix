@@ -193,8 +193,8 @@
           checks = lib.recursiveUpdate evalChecks helperChecks;
         };
 
-      # Eval-only host for a non-NixOS Linux control node (Fedora, Ubuntu…): never built or
-      # activated, it only carries custom.microvms so mkMicrovmFleet can emit runners + `nix-vm`.
+      # Eval-only host for a non-NixOS Linux control node: never built or activated, it only
+      # carries custom.microvms so mkMicrovmFleet can emit runners + `nix-vm`.
       mkStandaloneHost =
         {
           inputs,
