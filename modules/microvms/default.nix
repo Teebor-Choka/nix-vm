@@ -779,6 +779,32 @@ in
             sed -E "$@" "$r" > "$r.new" && chmod u+x "$r.new" && mv "$r.new" "$r"
           }
 
+          # qemu needs one virtiofsd per share; a NixOS host runs them as services, so start them here
+          # to support any Linux host. Pids land in $INST_DIR, which _sandy_reap_box already kills.
+          VIRTIOFSD="${optionalString (!pkgs.stdenv.isDarwin) "${pkgs.virtiofsd}/bin/virtiofsd"}"
+          _start_virtiofsd() {
+            local share_dir=$1/share/microvm/virtiofs tag_dir tag sock src ro _
+            [ -d "$share_dir" ] || return 0
+            for tag_dir in "$share_dir"/*/; do
+              tag=$(basename "$tag_dir"); sock=$(cat "$tag_dir/socket"); src=$(cat "$tag_dir/source")
+              [ "$tag" = launchmount ] && [ -n "$MOUNT_SRC" ] && src=$MOUNT_SRC
+              case "$src" in /*) ;; *) mkdir -p "$src" ;; esac
+              ro=""; [ "$tag" = ro-store ] && ro=--readonly
+              # Unprivileged virtiofsd can only act as us: squash every guest uid/gid onto ours, or
+              # creates fail with EINVAL (guest gid 100 is unmapped in its namespace).
+              "$VIRTIOFSD" --socket-path="$sock" --shared-dir="$src" --sandbox=namespace $ro \
+                --translate-uid "squash-guest:0:$(id -u):4294967295" \
+                --translate-gid "squash-guest:0:$(id -g):4294967295" \
+                >>"$INST_DIR/virtiofsd-$tag.log" 2>&1 &
+              echo $! > "$INST_DIR/virtiofsd-$tag.pid"
+            done
+            for tag_dir in "$share_dir"/*/; do
+              sock=$(cat "$tag_dir/socket")
+              for _ in $(seq 50); do [ -S "$sock" ] && break; sleep 0.1; done
+              [ -S "$sock" ] || { echo "✗ virtiofsd $(basename "$tag_dir") did not start: $INST_DIR/virtiofsd-*.log" >&2; return 1; }
+            done
+          }
+
           # Space-list membership test: _in_list <needle> <item…>
           _in_list() { local n=$1; shift; local x; for x in $*; do [ "$x" = "$n" ] && return 0; done; return 1; }
 
@@ -929,8 +955,8 @@ in
           # Pidfile lives in the base dir so the per-instance cleanup trap never kills it.
           _ensure_agent_bridge() {
             local name=''${1:?} base_dir=''${2:?}
-            local port="''${VM_VSOCK_PORTS[$name]:?'Unknown VM: use vm list'}"
             [ "''${VM_FORWARD_AGENT[$name]:-1}" = 1 ] || return 0
+            local port="''${VM_VSOCK_PORTS[$name]:?'Unknown VM: use vm list'}"
             # Launch-time trust: bridge the host agent only when `agent` is granted this launch.
             # ($GRANT is the launch grant; vm_doctor sets it from the persisted per-VM .launch-grant.)
             _in_list agent "$GRANT" || { echo "→ SSH agent withheld from $name (not trusted this launch)"; return 0; }
@@ -1196,6 +1222,7 @@ in
             [ -n "$mem_pat" ] && { grep -q -- "$mem_pat" "$INST_DIR/microvm-run" && echo "→ mem override: ''${MEM_OVERRIDE} MiB" \
               || echo "⚠  --mem override did not match the runner — booting with the built-in mem" >&2; }
 
+            [ "$OS" = "Darwin" ] || _start_virtiofsd "$runner_pkg" || return 1
             RUNNER="$INST_DIR/microvm-run"
           }
 
