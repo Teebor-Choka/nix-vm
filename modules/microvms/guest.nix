@@ -132,14 +132,25 @@ in
     };
 
   # tmpfs mode: /home is RAM-backed (no host device). disk mode mounts /home from the volume above.
-  fileSystems."/home" = lib.mkIf (homeBackingResolved == "tmpfs") {
-    device = "tmpfs";
-    fsType = "tmpfs";
-    options = [
-      "mode=0755"
-      "size=${toString vmSpec.homeSize}m"
-    ];
-  };
+  # readOnly shares also mount ro in the guest: the only guard on vfkit, which has no host-side
+  # read-only virtio-fs (guest root can remount it rw there).
+  fileSystems = lib.mkMerge [
+    {
+      "/home" = lib.mkIf (homeBackingResolved == "tmpfs") {
+        device = "tmpfs";
+        fsType = "tmpfs";
+        options = [
+          "mode=0755"
+          "size=${toString vmSpec.homeSize}m"
+        ];
+      };
+    }
+    (lib.listToAttrs (
+      map (s: lib.nameValuePair s.mountPoint { options = [ "ro" ]; }) (
+        lib.filter (s: s.readOnly) resolvedExtraShares
+      )
+    ))
+  ];
 
   # ── Agent device attach — conditional per hypervisor ─────────────────────────
   #
