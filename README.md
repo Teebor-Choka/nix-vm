@@ -172,7 +172,7 @@ Declared in `modules/options.nix` and `modules/microvms/default.nix`.
 | `custom.shellAliases` | `{str→str}` | `{sudo="sudo ";}` | System shell aliases (shared base) |
 | `custom.enableDirenv` | `bool` | `true` | direnv + nix-direnv + zsh hook |
 | `custom.enableGnupgAgent` | `bool` | `true` | GnuPG agent |
-| `custom.flakeDir` | `str` | `~/…/.config/nix` | Absolute path to your host flake (for `rebuild-me` and VM helpers) |
+| `custom.flakeDir` | `str` | `~/…/.config/nix` | Absolute path to your host flake (for the VM helpers) |
 | `custom.homebrew.taps` | `[str]` | `[]` | Homebrew taps (darwin) |
 | `custom.homebrew.brews` | `[str]` | `[]` | Homebrew formulae |
 | `custom.homebrew.casks` | `[str]` | `[]` | Homebrew casks |
@@ -281,7 +281,6 @@ Every host (darwin or NixOS) gets via `nixosModules.shared`:
 - Homebrew integration via nix-homebrew (`custom.homebrew.*`)
 - TouchID for sudo (`security.pam.services.sudo_local.touchIdAuth`)
 - Spotlight indexing of Nix `.app` bundles
-- `rebuild-me` alias → `sudo darwin-rebuild switch --flake <custom.flakeDir>`
 
 ### NixOS specifics (`nixosModules.core`)
 
@@ -289,4 +288,3 @@ Every host (darwin or NixOS) gets via `nixosModules.shared`:
 - NetworkManager
 - Pipewire (ALSA + PulseAudio compat)
 - OpenSSH server
-- `rebuild-me` alias → `sudo nixos-rebuild switch --flake <custom.flakeDir>`

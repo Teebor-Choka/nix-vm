@@ -617,7 +617,7 @@ in
     flakeDir = mkOption {
       type = types.str;
       default = "${homePrefix}/${config.custom.username}/.config/nix";
-      description = "Absolute path to the nix flake directory (used by vm/builder helpers and rebuild-me alias)";
+      description = "Absolute path to the nix flake directory (used by the vm/builder helpers)";
     };
     microvmDefaults = {
       timeZone = mkOption {
