@@ -59,11 +59,6 @@
   programs.zsh.syntaxHighlighting.enable = true;
   programs.zsh.autosuggestions.enable = true;
 
-  environment.shellAliases.rebuild-me = import ../lib/rebuild-alias.nix {
-    flakeDir = config.custom.flakeDir;
-    tool = "nixos";
-  };
-
   # ── System state version — overridable so each host can pin its own original value
   system.stateVersion = lib.mkDefault "24.05";
 }

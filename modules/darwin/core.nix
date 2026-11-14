@@ -23,10 +23,6 @@
   programs.bash.completion.enable = true;
 
   environment.systemPackages = with pkgs; [ mkalias ];
-  environment.shellAliases.rebuild-me = import ../lib/rebuild-alias.nix {
-    flakeDir = config.custom.flakeDir;
-    tool = "darwin";
-  };
 
   security.pam.services.sudo_local.touchIdAuth = true;
 
