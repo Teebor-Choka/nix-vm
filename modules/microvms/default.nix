@@ -34,6 +34,11 @@ let
   # Whether the host `vm` helper should bridge the SSH agent for each VM (name → 0|1)
   vmForwardAgentStr = bakeMap (spec: if spec.forwardSshAgent then "1" else "0");
   vmPersistentStr = bakeMap (spec: if spec.persistent then "1" else "0");
+  # Per-VM virtiofs tags the Linux helper serves read-only (name → space list).
+  shareTag = s: if s.tag != "" then s.tag else baseNameOf s.mountPoint;
+  vmRoTagsStr = bakeMap (
+    spec: ''"ro-store ${concatMapStringsSep " " shareTag (filter (s: s.readOnly) spec.extraShares)}"''
+  );
   # Per-VM default trust grant (name → csv of tokens; empty = grant nothing). Quoted so an empty
   # value or a multi-token csv survives the bash assoc-array literal.
   vmTrustDefaultStr = bakeMap (spec: ''"${concatStringsSep "," spec.trust.default}"'');
@@ -354,11 +359,16 @@ let
                 default = "";
                 description = "virtiofs tag (auto-derived from basename(mountPoint) when empty)";
               };
+              readOnly = mkOption {
+                type = types.bool;
+                default = false;
+                description = "Mount the share ro in the guest; on qemu the host also serves it with virtiofsd --readonly. vfkit has no host-side equivalent, so there guest root can remount it rw.";
+              };
             };
           }
         );
         default = [ ];
-        description = "Extra host directories to share into this VM (virtiofs, read-write). Opt-in per VM.";
+        description = "Extra host directories to share into this VM (virtiofs, read-write unless readOnly). Opt-in per VM.";
         example = literalExpression ''
           [{ source = "/Users/alice/Projects"; mountPoint = "/home/alice/Projects"; }]
         '';
@@ -688,6 +698,13 @@ in
 
         (pkgs.writeShellScriptBin "nix-vm" ''
           set -euo pipefail
+          # Fallback for non-NixOS hosts (mkStandaloneHost), where systemPackages are never installed.
+          PATH="$PATH:${
+            makeBinPath [
+              pkgs.python3
+              pkgs.socat
+            ]
+          }"
 
           FLAKE="${flakeDir}"
           DEFINED_VMS="${vmNamesStr}"
@@ -713,6 +730,9 @@ in
 
           # Per-VM persistence (0 = ephemeral per-instance, 1 = persistent single-instance)
           declare -A VM_PERSISTENT=(${vmPersistentStr})
+
+          # Per-VM virtiofs tags served read-only by the host virtiofsd (Linux)
+          declare -A VM_RO_TAGS=(${vmRoTagsStr})
 
           # Per-VM SSH-agent forwarding (1 = bridge the host agent, 0 = skip)
           declare -A VM_FORWARD_AGENT=(${vmForwardAgentStr})
@@ -777,6 +797,38 @@ in
           _patch_runner() {
             local r="$INST_DIR/microvm-run"
             sed -E "$@" "$r" > "$r.new" && chmod u+x "$r.new" && mv "$r.new" "$r"
+          }
+
+          # qemu needs one virtiofsd per share, served unprivileged so any Linux host works (needs
+          # unprivileged user namespaces). Pids land in $INST_DIR, which _sandy_reap_box already kills.
+          VIRTIOFSD="${optionalString (!pkgs.stdenv.isDarwin) "${pkgs.virtiofsd}/bin/virtiofsd"}"
+          _start_virtiofsd() {
+            local share_dir=$1/share/microvm/virtiofs ro_tags=''${VM_RO_TAGS[$2]:-ro-store} tag_dir tag sock src ro _
+            [ -d "$share_dir" ] || return 0
+            for tag_dir in "$share_dir"/*/; do
+              tag=$(basename "$tag_dir"); sock=$(cat "$tag_dir/socket"); src=$(cat "$tag_dir/source")
+              [ "$tag" = launchmount ] && [ -n "$MOUNT_SRC" ] && src=$MOUNT_SRC
+              case "$src" in /*) ;; *) mkdir -p "$src" ;; esac
+              ro=""; _in_list "$tag" $ro_tags && ro=--readonly
+              # Unprivileged virtiofsd can only act as us: squash every guest uid/gid onto ours, or
+              # creates fail with EINVAL (guest gid 100 is unmapped in its namespace).
+              "$VIRTIOFSD" --socket-path="$sock" --shared-dir="$src" --sandbox=namespace $ro \
+                --translate-uid "squash-guest:0:$(id -u):4294967295" \
+                --translate-gid "squash-guest:0:$(id -g):4294967295" \
+                >>"$INST_DIR/virtiofsd-$tag.log" 2>&1 &
+              echo $! > "$INST_DIR/virtiofsd-$tag.pid"
+            done
+            for tag_dir in "$share_dir"/*/; do
+              sock=$(cat "$tag_dir/socket")
+              for _ in $(seq 50); do [ -S "$sock" ] && break; sleep 0.1; done
+              # The log lives in $INST_DIR, which the exit trap wipes, so show it here.
+              [ -S "$sock" ] || {
+                tag=$(basename "$tag_dir")
+                echo "✗ virtiofsd $tag did not start:" >&2
+                tail -n 20 "$INST_DIR/virtiofsd-$tag.log" >&2
+                return 1
+              }
+            done
           }
 
           # Space-list membership test: _in_list <needle> <item…>
@@ -929,8 +981,8 @@ in
           # Pidfile lives in the base dir so the per-instance cleanup trap never kills it.
           _ensure_agent_bridge() {
             local name=''${1:?} base_dir=''${2:?}
-            local port="''${VM_VSOCK_PORTS[$name]:?'Unknown VM: use vm list'}"
             [ "''${VM_FORWARD_AGENT[$name]:-1}" = 1 ] || return 0
+            local port="''${VM_VSOCK_PORTS[$name]:?'Unknown VM: use vm list'}"
             # Launch-time trust: bridge the host agent only when `agent` is granted this launch.
             # ($GRANT is the launch grant; vm_doctor sets it from the persisted per-VM .launch-grant.)
             _in_list agent "$GRANT" || { echo "→ SSH agent withheld from $name (not trusted this launch)"; return 0; }
@@ -1196,6 +1248,7 @@ in
             [ -n "$mem_pat" ] && { grep -q -- "$mem_pat" "$INST_DIR/microvm-run" && echo "→ mem override: ''${MEM_OVERRIDE} MiB" \
               || echo "⚠  --mem override did not match the runner — booting with the built-in mem" >&2; }
 
+            [ "$OS" = "Darwin" ] || _start_virtiofsd "$runner_pkg" "$name" || return 1
             RUNNER="$INST_DIR/microvm-run"
           }
 

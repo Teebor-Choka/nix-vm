@@ -250,13 +250,15 @@ def main() -> None:
                     out = snap[:idx].replace(b"\r\n", b"\n").replace(b"\r", b"\n")
                     sys.stdout.buffer.write(out)
                     sys.stdout.buffer.flush()
-                    # Parse the exit code that immediately follows the sentinel
+                    buf = bytearray(snap[idx:])
+                    # The rc digits can land in a later read than the sentinel; wait for the
+                    # terminating newline instead of defaulting to 1.
                     rest = snap[idx + len(end_enc):]
-                    m    = re.match(rb"(\d+)", rest)
+                    m    = re.match(rb"(\d+)[\r\n]", rest)
                     if m:
                         exit_code = int(m.group(1))
-                    print(f"[vm-run] end sentinel seen → exit {exit_code}", file=sys.stderr)
-                    phase = "done"
+                        print(f"[vm-run] end sentinel seen → exit {exit_code}", file=sys.stderr)
+                        phase = "done"
                 else:
                     # Stream the safe prefix; hold back len(end_enc) bytes for partial matches
                     safe = max(0, len(buf) - len(end_enc))

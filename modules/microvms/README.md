@@ -12,7 +12,7 @@ Key properties:
 - **Optional forwarded SSH agent** over virtio-vsock (`forwardSshAgent`, default on) — tool-agnostic,
   forwards the host's `$SSH_AUTH_SOCK`; no private keys stored in the VM. Gated per launch by the
   `agent` trust token (see *Launch-time trust*).
-- Optional per-VM virtiofs shares (`extraShares`, read-write, opt-in).
+- Optional per-VM virtiofs shares (`extraShares`, opt-in, read-write unless `readOnly`).
 - Full home-manager user layer (darwin-only items no-op on Linux).
 
 This is a generic base: consumer-specific packages, overlays, and secret/mount mechanisms are injected
@@ -163,7 +163,7 @@ Per-instance (ephemeral): `~/.local/state/microvm/<name>/run.<pid>.<rand>/` hold
 | `trustedPublicKeys` | *(matching keys)* | Guest cache public keys |
 | `hmModules` | `[home-manager/home.nix]` | Base home-manager modules |
 | `extraHmModules` | `[]` | Per-VM home-manager layer |
-| `extraShares` | `[]` | Virtiofs shares `[{ source, mountPoint, tag? }]` |
+| `extraShares` | `[]` | Virtiofs shares `[{ source, mountPoint, tag?, readOnly? }]`. `readOnly` mounts ro in the guest; on qemu the host virtiofsd also serves it `--readonly` (vfkit has no host-side equivalent). |
 | `launchMount` | `true` | Give the VM a launch-mount slot (at `launchMountPoint`) for `vm run --mount <dir>` and `defaultMount` (empty/isolated unless a source is provided). `false` omits the slot and rejects `--mount`. |
 | `launchMountPoint` | `/mnt/host` | Guest path where the launch-mount slot is mounted (RW). |
 | `defaultMount` | `null` | Host dir mounted (at `launchMountPoint`) when the `shares` token is granted. `--mount` overrides it; `--isolated` withholds it. Requires `launchMount = true`. |
