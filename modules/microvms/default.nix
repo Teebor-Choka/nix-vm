@@ -812,7 +812,10 @@ in
               ro=""; _in_list "$tag" $ro_tags && ro=--readonly
               # Unprivileged virtiofsd can only act as us: squash every guest uid/gid onto ours, or
               # creates fail with EINVAL (guest gid 100 is unmapped in its namespace).
+              # Unprivileged virtiofsd holds one fd per guest-cached inode, so a guest `find /` over a
+              # big host store blows its default 1M cap; take whatever hard limit the host grants.
               "$VIRTIOFSD" --socket-path="$sock" --shared-dir="$src" --sandbox=namespace $ro \
+                --rlimit-nofile="$(ulimit -Hn)" \
                 --translate-uid "squash-guest:0:$(id -u):4294967295" \
                 --translate-gid "squash-guest:0:$(id -g):4294967295" \
                 >>"$INST_DIR/virtiofsd-$tag.log" 2>&1 &
