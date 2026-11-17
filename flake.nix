@@ -552,6 +552,7 @@
           # so it isn't a runnable check — but syntax-check it so a broken edit fails CI.
           vm-smoke-syntax = pkgs.runCommand "vm-smoke-syntax" { nativeBuildInputs = [ pkgs.bash ]; } ''
             bash -n ${./tests/vm-smoke-suite.sh}
+            bash -n ${./tests/linux-host-suite.sh}
             touch "$out"
           '';
 
