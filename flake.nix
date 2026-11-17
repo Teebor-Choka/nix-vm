@@ -475,6 +475,131 @@
         else
           throw "mkMicrovmFleet regressed: ${lib.concatStringsSep "; " failures}";
 
+      # Host-side assertions on extraShares (virtiofs tags, guest mount points). Each case builds a
+      # standalone host and keeps only OUR failed assertions (message starts "microVM '"), since a
+      # bare host fails unrelated NixOS ones (no root fs). `expect` = null means no assertion fires.
+      shareAssertionFailures =
+        let
+          share =
+            mp: extra:
+            {
+              source = "/srv/x";
+              mountPoint = mp;
+            }
+            // extra;
+          tag36 = lib.concatStrings (lib.replicate 36 "a");
+          cases = [
+            {
+              name = "distinct shares";
+              shares = [
+                (share "/mnt/a" { })
+                (share "/mnt/b" { })
+              ];
+              expect = null;
+            }
+            {
+              name = "read-only share";
+              shares = [ (share "/mnt/a" { readOnly = true; }) ];
+              expect = null;
+            }
+            {
+              name = "tag of exactly 36";
+              shares = [ (share "/mnt/a" { tag = tag36; }) ];
+              expect = null;
+            }
+            {
+              name = "same basename";
+              shares = [
+                (share "/home/a/src" { })
+                (share "/home/b/src" { })
+              ];
+              expect = "duplicate virtiofs tag";
+            }
+            {
+              name = "same explicit tag";
+              shares = [
+                (share "/mnt/a" { tag = "t"; })
+                (share "/mnt/b" { tag = "t"; })
+              ];
+              expect = "duplicate virtiofs tag";
+            }
+            {
+              name = "tag of launchmount";
+              shares = [ (share "/mnt/a" { tag = "launchmount"; }) ];
+              expect = "reserved virtiofs tag";
+            }
+            {
+              name = "tag of ro-store";
+              shares = [ (share "/mnt/a" { tag = "ro-store"; }) ];
+              expect = "reserved virtiofs tag";
+            }
+            {
+              name = "basename of injected-secrets";
+              shares = [ (share "/x/injected-secrets" { }) ];
+              expect = "reserved virtiofs tag";
+            }
+            {
+              name = "tag of 37";
+              shares = [ (share "/mnt/a" { tag = tag36 + "a"; }) ];
+              expect = "longer than 36";
+            }
+            {
+              name = "empty tag";
+              shares = [ (share "/" { }) ];
+              expect = "empty virtiofs tag";
+            }
+            {
+              name = "mounted on /home";
+              shares = [ (share "/home" { }) ];
+              expect = "mount point";
+            }
+            {
+              name = "mounted on launch slot";
+              shares = [ (share "/mnt/host" { }) ];
+              expect = "mount point";
+            }
+            {
+              name = "mounted on ro-store";
+              shares = [ (share "/nix/.ro-store" { }) ];
+              expect = "mount point";
+            }
+            {
+              name = "same mount point twice";
+              shares = [
+                (share "/mnt/a" { })
+                (share "/mnt/a" { tag = "other"; })
+              ];
+              expect = "mount point";
+            }
+          ];
+          failed =
+            shares:
+            map (a: a.message) (
+              lib.filter (a: !a.assertion && lib.hasPrefix "microVM '" a.message)
+                (mkStandaloneHost {
+                  inherit inputs;
+                  modules = [
+                    {
+                      custom.username = "tester";
+                      custom.microvms.t.extraShares = shares;
+                    }
+                  ];
+                }).config.assertions
+            );
+          verdict =
+            c:
+            let
+              got = failed c.shares;
+            in
+            if c.expect == null then
+              lib.optional (got != [ ]) "${c.name}: unexpected: ${lib.concatStringsSep " | " got}"
+            else
+              lib.optional (
+                !(lib.any (lib.hasInfix c.expect) got)
+              ) "${c.name}: no assertion containing '${c.expect}' (got: ${toString got})";
+        in
+        lib.concatMap verdict cases;
+
       # Instantiate a minimal NixOS host that includes the microvms module, to extract the
       # host-side `vm` helper (nix-vm) for black-box CLI tests without a consumer flake.
       # Linux-only (nixosSystem); on Linux the darwin-only builder helper is absent, so the
@@ -550,6 +675,14 @@
 
           # The live smoke suite can't run in the sandbox (needs a real hypervisor + network),
           # so it isn't a runnable check — but syntax-check it so a broken edit fails CI.
+          microvm-share-assertions = pkgs.runCommand "microvm-share-assertions" { } ''
+            ${lib.optionalString (shareAssertionFailures != [ ]) ''
+              printf '%s\n' ${lib.escapeShellArgs shareAssertionFailures} >&2
+              exit 1
+            ''}
+            touch "$out"
+          '';
+
           vm-smoke-syntax = pkgs.runCommand "vm-smoke-syntax" { nativeBuildInputs = [ pkgs.bash ]; } ''
             bash -n ${./tests/vm-smoke-suite.sh}
             bash -n ${./tests/linux-host-suite.sh}

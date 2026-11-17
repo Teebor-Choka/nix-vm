@@ -39,6 +39,71 @@ let
   vmRoTagsStr = bakeMap (
     spec: ''"ro-store ${concatMapStringsSep " " shareTag (filter (s: s.readOnly) spec.extraShares)}"''
   );
+  # Tags and guest mount points the module claims for its own shares (guest.nix): /nix/store, the
+  # injected-secrets staging area and the launch-mount slot, plus /home (tmpfs or home.img).
+  reservedTags = [
+    "ro-store"
+    "injected-secrets"
+    "launchmount"
+  ];
+  reservedMounts =
+    spec:
+    [
+      "/home"
+      "/nix/.ro-store"
+      "/run/injected-secrets"
+    ]
+    ++ optional spec.launchMount spec.launchMountPoint;
+  # The virtio-fs config space holds a 36-byte tag.
+  maxShareTag = 36;
+  shareMount = s: removeSuffix "/" s.mountPoint;
+  # extraShares checks for one VM: every share's tag and mount point must be usable and must not
+  # collide with another share or with the module's own. A clash fails at eval time with a clear
+  # message instead of a module-system conflict or a guest that mounts the wrong share.
+  shareAssertions =
+    name: spec:
+    let
+      pre = "microVM '${name}': extraShares";
+      tags = map shareTag spec.extraShares;
+      mounts = map shareMount spec.extraShares;
+      dups = xs: unique (filter (x: count (y: y == x) xs > 1) xs);
+    in
+    concatLists (
+      imap0 (
+        i: s:
+        let
+          t = shareTag s;
+        in
+        [
+          {
+            assertion = t != "";
+            message = "${pre}[${toString i}] has an empty virtiofs tag (mountPoint '${s.mountPoint}' has no basename); set 'tag'.";
+          }
+          {
+            assertion = stringLength t <= maxShareTag;
+            message = "${pre}[${toString i}] tag '${t}' is longer than ${toString maxShareTag} bytes, the virtio-fs limit; set a shorter 'tag'.";
+          }
+          {
+            assertion = !(elem t reservedTags);
+            message = "${pre}[${toString i}] tag '${t}' is a reserved virtiofs tag (${concatStringsSep ", " reservedTags}); set a different 'tag'.";
+          }
+          {
+            assertion = !(elem (shareMount s) (reservedMounts spec));
+            message = "${pre}[${toString i}] mount point '${s.mountPoint}' is used by the module itself (${concatStringsSep ", " (reservedMounts spec)}); mount the share elsewhere.";
+          }
+        ]
+      ) spec.extraShares
+    )
+    ++ [
+      {
+        assertion = dups tags == [ ];
+        message = "${pre} have duplicate virtiofs tag(s): ${concatStringsSep ", " (dups tags)}. Tags default to the mountPoint basename; set a distinct 'tag' on each share.";
+      }
+      {
+        assertion = dups mounts == [ ];
+        message = "${pre} use one mount point twice: ${concatStringsSep ", " (dups mounts)}.";
+      }
+    ];
   # Per-VM default trust grant (name → csv of tokens; empty = grant nothing). Quoted so an empty
   # value or a multi-token csv survives the bash assoc-array literal.
   vmTrustDefaultStr = bakeMap (spec: ''"${concatStringsSep "," spec.trust.default}"'');
@@ -670,6 +735,7 @@ in
             }) spec.secrets
           ) cfg
         )
+        ++ concatLists (mapAttrsToList shareAssertions cfg)
         # defaultMount needs the launch-mount slot to exist.
         ++ mapAttrsToList (name: spec: {
           assertion = spec.defaultMount == null || spec.launchMount;
