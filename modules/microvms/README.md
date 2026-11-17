@@ -163,7 +163,7 @@ Per-instance (ephemeral): `~/.local/state/microvm/<name>/run.<pid>.<rand>/` hold
 | `trustedPublicKeys` | *(matching keys)* | Guest cache public keys |
 | `hmModules` | `[home-manager/home.nix]` | Base home-manager modules |
 | `extraHmModules` | `[]` | Per-VM home-manager layer |
-| `extraShares` | `[]` | Virtiofs shares `[{ source, mountPoint, tag?, readOnly? }]`. `readOnly` mounts ro in the guest; on qemu the host virtiofsd also serves it `--readonly` (vfkit has no host-side equivalent). |
+| `extraShares` | `[]` | Virtiofs shares `[{ source, mountPoint, tag?, readOnly? }]`. `readOnly` mounts ro in the guest; on qemu the host virtiofsd also serves it `--readonly` (vfkit has no host-side equivalent). `tag` defaults to the `mountPoint` basename. Eval fails on an empty or duplicate tag, a tag over 36 bytes, the reserved tags `ro-store`/`injected-secrets`/`launchmount`, and a mount point on `/home`, `/nix/.ro-store`, `/run/injected-secrets`, the launch-mount slot, or another share. |
 | `launchMount` | `true` | Give the VM a launch-mount slot (at `launchMountPoint`) for `vm run --mount <dir>` and `defaultMount` (empty/isolated unless a source is provided). `false` omits the slot and rejects `--mount`. |
 | `launchMountPoint` | `/mnt/host` | Guest path where the launch-mount slot is mounted (RW). |
 | `defaultMount` | `null` | Host dir mounted (at `launchMountPoint`) when the `shares` token is granted. `--mount` overrides it; `--isolated` withholds it. Requires `launchMount = true`. |
