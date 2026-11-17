@@ -114,8 +114,15 @@
                 vmName: _:
                 lib.nameValuePair "microvm-${vmName}" guestConfigs.${vmName}.config.microvm.declaredRunner
               ) builtHosts.${hn}.config.custom.microvms;
+              # Exposed so a non-NixOS host (mkStandaloneHost) can `nix run .#nix-vm`.
+              helper = lib.findFirst (
+                p: (p.name or "") == "nix-vm"
+              ) null builtHosts.${hn}.config.environment.systemPackages;
             in
-            acc // { ${sys} = (acc.${sys} or { }) // vmPkgs; }
+            acc
+            // {
+              ${sys} = (acc.${sys} or { }) // vmPkgs // lib.optionalAttrs (helper != null) { nix-vm = helper; };
+            }
           ) { } hostNames;
 
           packages =
@@ -184,6 +191,29 @@
         {
           inherit guestConfigs builderVm packages;
           checks = lib.recursiveUpdate evalChecks helperChecks;
+        };
+
+      # Eval-only host for a non-NixOS Linux control node: never built or activated, it only
+      # carries custom.microvms so mkMicrovmFleet can emit runners + `nix-vm`.
+      mkStandaloneHost =
+        {
+          inputs,
+          system ? "x86_64-linux",
+          modules,
+        }:
+        inputs.nixpkgs.lib.nixosSystem {
+          inherit system;
+          specialArgs = {
+            inherit inputs;
+            hostname = "standalone";
+          };
+          modules = [
+            moduleOutputs.nixosModules.options
+            moduleOutputs.nixosModules.microvms
+            inputs.home-manager.nixosModules.home-manager
+            { system.stateVersion = inputs.nixpkgs.lib.trivial.release; }
+          ]
+          ++ modules;
         };
 
       # ── microVM guest self-check ────────────────────────────────────────────────
@@ -522,6 +552,7 @@
           # so it isn't a runnable check — but syntax-check it so a broken edit fails CI.
           vm-smoke-syntax = pkgs.runCommand "vm-smoke-syntax" { nativeBuildInputs = [ pkgs.bash ]; } ''
             bash -n ${./tests/vm-smoke-suite.sh}
+            bash -n ${./tests/linux-host-suite.sh}
             touch "$out"
           '';
 
@@ -651,7 +682,7 @@
     // {
       # Consumer-facing helpers (input-free; callers pass their own inputs).
       lib = {
-        inherit mkMicrovmFleet;
+        inherit mkMicrovmFleet mkStandaloneHost;
       };
 
       checks = selfChecks;

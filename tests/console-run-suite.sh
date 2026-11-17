@@ -128,5 +128,53 @@ VM_RUN_TIMEOUT=abc run_case ./r10 'echo x'
 { [ "$RC" != 0 ] && grep -q 'VM_RUN_TIMEOUT must be' <<<"$ERR"; } \
   && ok "invalid VM_RUN_TIMEOUT rejected" || bad "invalid timeout (rc=$RC)"
 
+# make_split_runner <file> <send_digits:0|1>
+#   Runs the injected script for real, then writes its output to the console in two reads: the
+#   end sentinel first, the exit-code digits a second later (or never, when send_digits=0, then
+#   the console closes). Emulates a slow serial console delivering the digits in a later read.
+make_split_runner() {
+  local f=$1 send_digits=$2
+  {
+    echo "#!$BASH_BIN"
+    echo 'poweroff() { :; }; export -f poweroff'
+    echo 'echo "Reached target Multi-User"'
+    echo 'while IFS= read -r line; do'
+    echo '  case $line in'
+    echo "    \"printf '%s' '\"*)"
+    echo "      blob=\${line#\"printf '%s' '\"}; blob=\${blob%%\\'*}"
+    echo '      printf "%s" "$blob" | base64 -d > inner.sh'
+    echo '      command bash inner.sh > inner.out 2>&1'
+    echo "      python3 -c 'import re,sys,time"
+    echo 'd = open("inner.out","rb").read()'
+    echo 'm = re.search(rb"(\d+)\n$", d)'
+    echo 'sys.stdout.buffer.write(d[:m.start()]); sys.stdout.buffer.flush()'
+    echo "if $send_digits:"
+    echo '    time.sleep(1); sys.stdout.buffer.write(d[m.start():]); sys.stdout.buffer.flush()'
+    echo "'"
+    echo '      sleep 2; exit 0 ;;'   # let the driver read the sentinel before the PTY closes
+    echo '  esac'
+    echo 'done'
+  } > "$f"
+  chmod +x "$f"
+}
+
+# ── Case 11: exit-code digits arrive in a later console read than the end sentinel ────
+make_split_runner r11 1
+run_case ./r11 'echo split-ok; exit 7'
+{ [ "$RC" = 7 ] && grep -q 'split-ok' <<<"$OUT"; } \
+  && ok "exit code kept when its digits arrive after the end sentinel" \
+  || bad "split exit code (rc=$RC, want 7, out=$(tr '\n' '|' <<<"$OUT"), err=$(tr '\n' '|' <<<"$ERR"))"
+
+# ── Case 12: the output is written once when the digits are late (no re-flush of the prefix) ─
+c=$(grep -c 'split-ok' <<<"$OUT")
+[ "$c" = 1 ] && ok "output written once when the digits are late" || bad "output written $c times, want 1"
+
+# ── Case 13: console closes before the digits arrive: driver ends with exit 1, no hang ─
+make_split_runner r13 0
+VM_RUN_TIMEOUT=20 run_case ./r13 'echo no-digits; exit 7'
+{ [ "$RC" = 1 ] && grep -q 'no-digits' <<<"$OUT"; } \
+  && ok "console closed before the digits: exit 1, no hang" \
+  || bad "missing digits (rc=$RC, want 1, 124 = hang)"
+
 echo "── console-run suite: $pass passed, $fail failed ──"
 [ "$fail" = 0 ]

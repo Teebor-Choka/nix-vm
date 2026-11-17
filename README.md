@@ -155,6 +155,30 @@ in {
 with `inputs.microvm.nixosModules.microvm` + `nixosModules.microvmGuest` + the VM's
 `extraModules`; darwin hosts cross-build to their `-linux` guest system automatically.
 
+### Non-NixOS Linux host (`lib.mkStandaloneHost`)
+
+On Fedora or another Linux without NixOS, evaluate a host that is never activated and only carries
+`custom.microvms`, then pass it to `mkMicrovmFleet`. The fleet exports `packages.<sys>.nix-vm`, so
+the helper runs as `nix run .#nix-vm -- up <name>`. The helper starts one unprivileged virtiofsd
+per share, so the host needs `/dev/kvm` and unprivileged user namespaces.
+
+```nix
+host = inputs.nix-vm.lib.mkStandaloneHost {
+  inherit inputs; # must provide nixpkgs + home-manager
+  modules = [{
+    custom.username = "alice";
+    custom.flakeDir = "/home/alice/vms";
+    custom.microvms.dev.hypervisor = "qemu";
+  }];
+};
+fleet = inputs.nix-vm.lib.mkMicrovmFleet {
+  inherit inputs;
+  hosts.linux = { system = "x86_64-linux"; class = "nixos"; };
+  builtHosts.linux = host;
+  includeBuilder = false;
+};
+```
+
 ---
 
 ## `custom.*` option surface
