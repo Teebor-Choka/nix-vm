@@ -401,6 +401,18 @@
             "persistent VM still gets store.img" = lib.any (
               v: v.image == "store.img"
             ) persistentGuest.config.microvm.volumes;
+            # Disk-backed store overlay ⇒ build scratch is disk-backed too (root is a RAM tmpfs).
+            "scratch (/tmp, /var/tmp, build-dir) on store.img when overlay on disk" =
+              let
+                c = diskOverlayGuest.config;
+              in
+              c.fileSystems."/tmp".device == "/nix/.rw-store/tmp"
+              && c.fileSystems."/var/tmp".device == "/nix/.rw-store/var-tmp"
+              && c.nix.settings.build-dir == "/nix/.rw-store/builds";
+            "scratch on store.img for a persistent VM" =
+              persistentGuest.config.fileSystems."/tmp".device == "/nix/.rw-store/tmp";
+            "scratch stays on the root tmpfs when overlay is tmpfs" =
+              !(baseGuest.config.fileSystems ? "/tmp") && !(baseGuest.config.nix.settings ? build-dir);
           };
           failures = lib.attrNames (lib.filterAttrs (_: ok: !ok) conditions);
         in
