@@ -63,6 +63,22 @@ let
   # wiped on exit — same mechanism as an ephemeral home.img.
   storeOverlayOnDisk = vmSpec.persistent || vmSpec.storeOverlayBacking == "disk";
 
+  # ── Build scratch ───────────────────────────────────────────────────────────────
+  # The microvm root is a RAM tmpfs (half of `mem`), and /tmp, /var/tmp and nix's default
+  # build-dir (/nix/var/nix/builds on Nix >= 2.30) all live on it, so a large build hits ENOSPC
+  # even when the store overlay is on disk. Whenever the overlay is disk-backed, put them on the
+  # same store.img.
+  scratchDir = "/nix/.rw-store";
+  scratchBind = sub: {
+    device = "${scratchDir}/${sub}";
+    fsType = "none";
+    options = [
+      "bind"
+      "x-systemd.requires=scratch-on-disk-prepare.service"
+      "x-systemd.after=scratch-on-disk-prepare.service"
+    ];
+  };
+
 in
 {
   imports = [
@@ -150,7 +166,26 @@ in
         lib.filter (s: s.readOnly) resolvedExtraShares
       )
     ))
+    (lib.mkIf storeOverlayOnDisk {
+      "/tmp" = scratchBind "tmp";
+      "/var/tmp" = scratchBind "var-tmp";
+    })
   ];
+
+  systemd.services.scratch-on-disk-prepare = lib.mkIf storeOverlayOnDisk {
+    unitConfig.RequiresMountsFor = scratchDir;
+    before = [
+      "tmp.mount"
+      "var-tmp.mount"
+      "nix-daemon.service"
+    ];
+    requiredBy = [ "nix-daemon.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "/bin/sh -c 'mkdir -p ${scratchDir}/tmp ${scratchDir}/var-tmp ${scratchDir}/builds && chmod 1777 ${scratchDir}/tmp ${scratchDir}/var-tmp && chmod 0755 ${scratchDir}/builds'";
+    };
+  };
 
   # ── Agent device attach — conditional per hypervisor ─────────────────────────
   #
@@ -251,6 +286,7 @@ in
   # ── Nix settings
   nix.package = pkgs.nix;
   nix.settings = {
+    build-dir = lib.mkIf storeOverlayOnDisk "${scratchDir}/builds";
     experimental-features = "nix-command flakes";
     trusted-users = [
       "root"

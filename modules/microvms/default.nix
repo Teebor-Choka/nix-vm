@@ -504,7 +504,8 @@ let
           (default): the overlay upperdir lives on the root tmpfs, i.e. guest RAM capped at 50% of
           `mem` — a large `nix develop` closure can exhaust it with ENOSPC. "disk": a per-instance
           store.img of `storeSize` in the launch's working dir backs the overlay, wiped on exit like
-          an ephemeral home.img, so closures land on disk instead of RAM. Ignored when persistent
+          an ephemeral home.img, so closures land on disk instead of RAM. A disk-backed overlay also
+          puts /tmp, /var/tmp and nix's build-dir on that image (root is a RAM tmpfs). Ignored when persistent
           (those VMs always get a disk-backed, boot-surviving store.img at the fixed base dir).
         '';
       };

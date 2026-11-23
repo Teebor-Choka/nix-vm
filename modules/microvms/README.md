@@ -141,7 +141,8 @@ Per-instance (ephemeral): `~/.local/state/microvm/<name>/run.<pid>.<rand>/` hold
 | `vcpu` | `12` | Virtual CPU count |
 | `mem` | `10240` | RAM in MiB |
 | `homeSize` | `10240` | `/home` size in MiB |
-| `storeSize` | `20480` | Writable store overlay size in MiB (persistent mode) |
+| `storeSize` | `20480` | Writable store overlay size in MiB (persistent mode, or `storeOverlayBacking = "disk"`) |
+| `storeOverlayBacking` | `tmpfs` | `tmpfs` / `disk`. `disk` backs the writable store overlay with a store.img and also puts `/tmp`, `/var/tmp` and nix `build-dir` on it (root is a RAM tmpfs). Persistent VMs always use disk. |
 | `persistent` | `false` | Ephemeral+concurrent vs persistent single-instance (lock-guarded) |
 | `homeBacking` | `auto` | `tmpfs` / `disk` / `auto` (tmpfs when `mem > 2*homeSize`) |
 | `storeBacking` | `host` | `host` = share host `/nix/store` (ro, fast); `image` = per-VM EROFS |
