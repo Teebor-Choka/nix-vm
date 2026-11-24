@@ -173,7 +173,12 @@ in
   ];
 
   systemd.services.scratch-on-disk-prepare = lib.mkIf storeOverlayOnDisk {
-    unitConfig.RequiresMountsFor = scratchDir;
+    unitConfig = {
+      # Runs before tmp.mount (local-fs). Default deps add After=sysinit.target, which is
+      # after local-fs: an ordering cycle that fails the boot ("Failed to isolate default target").
+      DefaultDependencies = false;
+      RequiresMountsFor = scratchDir;
+    };
     before = [
       "tmp.mount"
       "var-tmp.mount"
