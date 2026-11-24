@@ -411,6 +411,12 @@
               && c.nix.settings.build-dir == "/nix/.rw-store/builds";
             "scratch on store.img for a persistent VM" =
               persistentGuest.config.fileSystems."/tmp".device == "/nix/.rw-store/tmp";
+            # Ordered before tmp.mount (a local-fs member), a unit with default dependencies
+            # (After=sysinit.target) closes a loop: local-fs -> tmp.mount -> unit -> sysinit -> local-fs.
+            "scratch-on-disk-prepare opts out of default deps (ordering cycle)" =
+              (diskOverlayGuest.config.systemd.services.scratch-on-disk-prepare.unitConfig.DefaultDependencies
+                or true
+              ) == false;
             "scratch stays on the root tmpfs when overlay is tmpfs" =
               !(baseGuest.config.fileSystems ? "/tmp") && !(baseGuest.config.nix.settings ? build-dir);
           };
